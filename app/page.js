@@ -263,7 +263,7 @@ export default function CampusMart() {
         <nav>
           <a href="#beranda">🏠 Beranda</a>
           <a href="#produk">📦 Produk</a>
-          <a href="#jual">➕ Jual</a>
+          {adminLogged && <a href="#jual">➕ Jual</a>}
           <a href="#keranjang">
             🛒 Keranjang (<span id="cart-count">{cartCount}</span>)
           </a>
