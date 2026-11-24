@@ -85,11 +85,21 @@ export default function CampusMart() {
       const storedCart = JSON.parse(localStorage.getItem("cmCart") || "[]");
       if (Array.isArray(storedCart)) setCart(storedCart);
       setUserName(localStorage.getItem("cmUser") || "");
-      setAdminLogged(sessionStorage.getItem("cmAdmin") === "yes");
     } catch {
       // Data lokal rusak: tetap pakai data default.
     }
     setReady(true);
+
+    let active = true;
+    fetch("/api/admin/session")
+      .then((res) => (res.ok ? res.json() : { admin: false }))
+      .then((data) => {
+        if (active) setAdminLogged(Boolean(data && data.admin));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -180,22 +190,37 @@ export default function CampusMart() {
     setProfileMessage("Halo, " + name + "! Profil tersimpan di browser ini.");
   }
 
-  function loginAdmin(event) {
+  async function loginAdmin(event) {
     event.preventDefault();
-    if (adminUser.trim() === "admin" && adminPass === "admin") {
-      sessionStorage.setItem("cmAdmin", "yes");
+    setAdminMessage("");
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: adminUser.trim(), password: adminPass }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setAdminMessage((data && data.message) || "Username atau password salah.");
+        return;
+      }
       setAdminLogged(true);
       setAdminUser("");
       setAdminPass("");
-      setAdminMessage("");
       requestAnimationFrame(() => scrollTo("dashboard"));
-    } else {
-      setAdminMessage("Username atau password salah.");
+    } catch {
+      setAdminMessage("Tidak dapat menghubungi server. Coba lagi.");
     }
   }
 
-  function logoutAdmin() {
-    sessionStorage.removeItem("cmAdmin");
+  async function logoutAdmin() {
+    try {
+      const res = await fetch("/api/admin/logout", { method: "POST" });
+      if (!res.ok) throw new Error("logout failed");
+    } catch {
+      alert("Gagal keluar dari dashboard. Coba lagi.");
+      return;
+    }
     setAdminLogged(false);
     setAdminUser("");
     setAdminPass("");
@@ -437,9 +462,6 @@ export default function CampusMart() {
               <button className="primary" type="submit">
                 Masuk Dashboard
               </button>
-              <p className="hint">
-                Akun demo: username <b>admin</b> · password <b>admin</b>
-              </p>
               <p id="admin-message">{adminMessage}</p>
             </form>
           </div>
