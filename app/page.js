@@ -163,6 +163,10 @@ export default function CampusMart() {
 
   function submitProduct(event) {
     event.preventDefault();
+    if (!adminLogged) {
+      alert("Hanya admin yang dapat menambahkan produk.");
+      return;
+    }
     const name = sell.name.trim();
     const price = Number(sell.price);
     const phone = sell.phone.trim();
@@ -328,6 +332,18 @@ export default function CampusMart() {
 
       <section className="container" id="jual">
         <h2 className="section-title">🏪 Jual Produk Kamu</h2>
+        {!adminLogged ? (
+          <div className="panel" id="sell-locked">
+            <h3>Khusus Admin</h3>
+            <p className="muted" style={{ marginTop: 6 }}>
+              Hanya admin yang dapat menambahkan produk baru ke CampusMart. Masuk lewat Dashboard Admin untuk
+              membuka formulir ini.
+            </p>
+            <button className="primary" style={{ marginTop: 14 }} onClick={() => scrollTo("dashboard")}>
+              🔐 Masuk sebagai Admin
+            </button>
+          </div>
+        ) : (
         <div className="panel">
           <p>Tambahkan barang yang ingin kamu jual di CampusMart.</p>
           <form onSubmit={submitProduct}>
@@ -378,6 +394,7 @@ export default function CampusMart() {
             </button>
           </form>
         </div>
+        )}
       </section>
 
       <section className="container" id="keranjang">
