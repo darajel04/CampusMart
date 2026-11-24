@@ -2,15 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-const DEFAULTS = [
-  { id: 1, name: "Buku Pemrograman Dasar", price: 65000, category: "Buku", icon: "📚", phone: "6281234567890" },
-  { id: 2, name: "Paket Alat Tulis", price: 25000, category: "Alat Tulis", icon: "✏️", phone: "6281234567890" },
-  { id: 3, name: "Tote Bag Campus", price: 45000, category: "Fashion", icon: "👜", phone: "6281234567890" },
-  { id: 4, name: "Kopi Susu", price: 15000, category: "Makanan", icon: "☕", phone: "6281234567890" },
-  { id: 5, name: "Mouse Wireless", price: 85000, category: "Elektronik", icon: "🖱️", phone: "6281234567890" },
-  { id: 6, name: "Novel Best Seller", price: 50000, category: "Buku", icon: "📖", phone: "6281234567890" },
-];
-
 const CATEGORY_FILTERS = [
   ["Semua", "Semua"],
   ["📚 Buku", "Buku"],
@@ -53,19 +44,22 @@ function PriceInput({ value, onCommit }) {
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
       }}
-      onBlur={() => {
+      onBlur={async () => {
         if (Number(draft) === Number(value)) {
           setDraft(String(value));
           return;
         }
-        if (!onCommit(draft)) setDraft(String(value));
+        const saved = await onCommit(draft);
+        if (!saved) setDraft(String(value));
       }}
     />
   );
 }
 
 export default function CampusMart() {
-  const [products, setProducts] = useState(DEFAULTS);
+  const [products, setProducts] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState("");
   const [cart, setCart] = useState([]);
   const [ready, setReady] = useState(false);
   const [search, setSearch] = useState("");
@@ -73,30 +67,59 @@ export default function CampusMart() {
   const [userName, setUserName] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [adminLogged, setAdminLogged] = useState(false);
+  const [adminConfigured, setAdminConfigured] = useState(null);
   const [adminUser, setAdminUser] = useState("");
   const [adminPass, setAdminPass] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
+  const [setupUser, setSetupUser] = useState("");
+  const [setupPass, setSetupPass] = useState("");
+  const [setupPass2, setSetupPass2] = useState("");
+  const [setupMessage, setSetupMessage] = useState("");
   const [sell, setSell] = useState({ name: "", price: "", category: "Buku", icon: "📦", phone: "" });
 
   useEffect(() => {
     try {
-      const storedProducts = JSON.parse(localStorage.getItem("cmProducts") || "null");
-      if (Array.isArray(storedProducts)) setProducts(storedProducts);
       const storedCart = JSON.parse(localStorage.getItem("cmCart") || "[]");
       if (Array.isArray(storedCart)) setCart(storedCart);
       setUserName(localStorage.getItem("cmUser") || "");
     } catch {
-      // Data lokal rusak: tetap pakai data default.
+      // Data lokal rusak: mulai dari keranjang kosong.
     }
     setReady(true);
 
     let active = true;
-    fetch("/api/admin/session")
-      .then((res) => (res.ok ? res.json() : { admin: false }))
+
+    fetch("/api/products", { cache: "no-store" })
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (!active) return;
+        if (!res.ok || !data) {
+          setCatalogError(
+            data?.error === "database_unavailable"
+              ? "Database katalog belum tersambung. Produk belum bisa ditampilkan."
+              : "Gagal memuat produk dari server."
+          );
+          return;
+        }
+        setProducts(Array.isArray(data.products) ? data.products : []);
+        setCatalogError("");
+      })
+      .catch(() => {
+        if (active) setCatalogError("Tidak dapat menghubungi server.");
+      })
+      .finally(() => {
+        if (active) setCatalogLoading(false);
+      });
+
+    fetch("/api/admin/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (active) setAdminLogged(Boolean(data && data.admin));
+        if (!active || !data) return;
+        setAdminLogged(Boolean(data.admin));
+        setAdminConfigured(Boolean(data.configured));
       })
       .catch(() => {});
+
     return () => {
       active = false;
     };
@@ -104,19 +127,18 @@ export default function CampusMart() {
 
   useEffect(() => {
     if (!ready) return;
-    localStorage.setItem("cmProducts", JSON.stringify(products));
     localStorage.setItem("cmCart", JSON.stringify(cart));
-  }, [products, cart, ready]);
+  }, [cart, ready]);
 
   const visibleProducts = products.filter(
     (p) =>
       (activeCategory === "Semua" || p.category === activeCategory) &&
-      p.name.toLowerCase().includes(search.toLowerCase())
+      String(p.name).toLowerCase().includes(search.toLowerCase())
   );
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const categories = new Set(products.map((p) => p.category)).size;
-  const productValue = products.reduce((sum, p) => sum + p.price, 0);
+  const productValue = products.reduce((sum, p) => sum + Number(p.price || 0), 0);
 
   function addCart(id) {
     const product = products.find((p) => p.id === id);
@@ -137,7 +159,10 @@ export default function CampusMart() {
   function contact(id) {
     const product = products.find((p) => p.id === id);
     if (!product) return;
-    openWhatsApp(product.phone, `Halo, saya tertarik dengan ${product.name} di CampusMart. Apakah masih tersedia?`);
+    openWhatsApp(
+      product.phone,
+      `Halo, saya tertarik dengan ${product.name} di CampusMart. Apakah masih tersedia?`
+    );
   }
 
   function checkout() {
@@ -161,10 +186,10 @@ export default function CampusMart() {
     openWhatsApp(phones[0], message);
   }
 
-  function submitProduct(event) {
+  async function submitProduct(event) {
     event.preventDefault();
     if (!adminLogged) {
-      alert("Hanya admin yang dapat menambahkan produk.");
+      alert("Hanya pembuat project yang dapat menambahkan produk.");
       return;
     }
     const name = sell.name.trim();
@@ -174,13 +199,31 @@ export default function CampusMart() {
       alert("Periksa kembali data produk.");
       return;
     }
-    setProducts([
-      { id: Date.now(), name, price, category: sell.category, icon: sell.icon.trim() || "📦", phone },
-      ...products,
-    ]);
-    setSell({ name: "", price: "", category: "Buku", icon: "📦", phone: "" });
-    alert("Produk berhasil ditambahkan.");
-    scrollTo("produk");
+
+    try {
+      const res = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          price,
+          category: sell.category,
+          icon: sell.icon.trim() || "📦",
+          phone,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert((data && data.message) || "Gagal menambahkan produk.");
+        return;
+      }
+      if (Array.isArray(data?.products)) setProducts(data.products);
+      setSell({ name: "", price: "", category: "Buku", icon: "📦", phone: "" });
+      alert("Produk berhasil ditambahkan.");
+      scrollTo("produk");
+    } catch {
+      alert("Tidak dapat menghubungi server. Coba lagi.");
+    }
   }
 
   function saveProfile() {
@@ -194,27 +237,78 @@ export default function CampusMart() {
     setProfileMessage("Halo, " + name + "! Profil tersimpan di browser ini.");
   }
 
-  async function loginAdmin(event) {
-    event.preventDefault();
+  async function doLogin(username, password) {
     setAdminMessage("");
     try {
       const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: adminUser.trim(), password: adminPass }),
+        body: JSON.stringify({ username, password }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
+        if (data && data.configured === false) setAdminConfigured(false);
         setAdminMessage((data && data.message) || "Username atau password salah.");
-        return;
+        return false;
       }
       setAdminLogged(true);
+      setAdminConfigured(true);
       setAdminUser("");
       setAdminPass("");
       requestAnimationFrame(() => scrollTo("dashboard"));
+      return true;
     } catch {
       setAdminMessage("Tidak dapat menghubungi server. Coba lagi.");
+      return false;
     }
+  }
+
+  async function loginAdmin(event) {
+    event.preventDefault();
+    await doLogin(adminUser.trim(), adminPass);
+  }
+
+  async function createOwnerAccount(event) {
+    event.preventDefault();
+    setSetupMessage("");
+
+    const username = setupUser.trim();
+    const password = setupPass;
+    if (username.length < 3) {
+      setSetupMessage("Username minimal 3 karakter.");
+      return;
+    }
+    if (password.length < 8) {
+      setSetupMessage("Password minimal 8 karakter.");
+      return;
+    }
+    if (password !== setupPass2) {
+      setSetupMessage("Konfirmasi password tidak sama.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/admin/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setSetupMessage((data && data.message) || "Gagal membuat akun pembuat project.");
+        return;
+      }
+    } catch {
+      setSetupMessage("Tidak dapat menghubungi server. Coba lagi.");
+      return;
+    }
+
+    setSetupUser("");
+    setSetupPass("");
+    setSetupPass2("");
+    setSetupMessage("");
+    setAdminConfigured(true);
+    await doLogin(username, password);
   }
 
   async function logoutAdmin() {
@@ -231,27 +325,63 @@ export default function CampusMart() {
     setAdminMessage("");
   }
 
-  function updatePrice(id, value) {
+  async function updatePrice(id, value) {
     const price = Number(value);
     if (!price || price <= 0) {
       alert("Harga harus lebih dari 0.");
       return false;
     }
-    setProducts(products.map((p) => (p.id === id ? { ...p, price } : p)));
-    setCart(cart.map((item) => (item.id === id ? { ...item, price } : item)));
-    return true;
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ price }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert((data && data.message) || "Gagal mengubah harga.");
+        return false;
+      }
+      if (Array.isArray(data?.products)) setProducts(data.products);
+      setCart(cart.map((item) => (item.id === id ? { ...item, price } : item)));
+      return true;
+    } catch {
+      alert("Tidak dapat menghubungi server. Coba lagi.");
+      return false;
+    }
   }
 
-  function deleteProduct(id) {
+  async function deleteProduct(id) {
     const product = products.find((p) => p.id === id);
     if (!product || !confirm(`Hapus produk "${product.name}" dari CampusMart?`)) return;
-    setProducts(products.filter((p) => p.id !== id));
-    setCart(cart.filter((item) => item.id !== id));
+    try {
+      const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert((data && data.message) || "Gagal menghapus produk.");
+        return;
+      }
+      if (Array.isArray(data?.products)) setProducts(data.products);
+      setCart(cart.filter((item) => item.id !== id));
+    } catch {
+      alert("Tidak dapat menghubungi server. Coba lagi.");
+    }
   }
 
-  function resetProducts() {
+  async function resetProducts() {
     if (!confirm("Kembalikan produk ke data awal? Produk yang kamu tambahkan akan dihapus.")) return;
-    setProducts(DEFAULTS.map((p) => ({ ...p })));
+    try {
+      const res = await fetch("/api/products/reset", { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert((data && data.message) || "Gagal mengatur ulang produk.");
+        return;
+      }
+      if (Array.isArray(data?.products)) setProducts(data.products);
+      setCart([]);
+    } catch {
+      alert("Tidak dapat menghubungi server. Coba lagi.");
+    }
   }
 
   return (
@@ -309,7 +439,9 @@ export default function CampusMart() {
           ))}
         </div>
         <div className="products" id="product-list">
-          {visibleProducts.length ? (
+          {catalogLoading ? (
+            <p className="empty">Memuat produk…</p>
+          ) : visibleProducts.length ? (
             visibleProducts.map((p) => (
               <article className="product" key={p.id}>
                 <div className="product-image">{p.icon}</div>
@@ -325,7 +457,7 @@ export default function CampusMart() {
               </article>
             ))
           ) : (
-            <p className="empty">Produk tidak ditemukan.</p>
+            <p className="empty">{catalogError || "Produk tidak ditemukan."}</p>
           )}
         </div>
       </section>
@@ -334,66 +466,66 @@ export default function CampusMart() {
         <h2 className="section-title">🏪 Jual Produk Kamu</h2>
         {!adminLogged ? (
           <div className="panel" id="sell-locked">
-            <h3>Khusus Admin</h3>
+            <h3>Khusus Pembuat Project</h3>
             <p className="muted" style={{ marginTop: 6 }}>
-              Hanya admin yang dapat menambahkan produk baru ke CampusMart. Masuk lewat Dashboard Admin untuk
-              membuka formulir ini.
+              Hanya pembuat project yang dapat menambahkan produk baru ke CampusMart. Masuk lewat Dashboard
+              Admin untuk membuka formulir ini.
             </p>
             <button className="primary" style={{ marginTop: 14 }} onClick={() => scrollTo("dashboard")}>
               🔐 Masuk sebagai Admin
             </button>
           </div>
         ) : (
-        <div className="panel">
-          <p>Tambahkan barang yang ingin kamu jual di CampusMart.</p>
-          <form onSubmit={submitProduct}>
-            <label>Nama Produk</label>
-            <input
-              className="form-control"
-              required
-              placeholder="Contoh: Buku Pemrograman"
-              value={sell.name}
-              onChange={(e) => setSell({ ...sell, name: e.target.value })}
-            />
-            <label>Harga (Rp)</label>
-            <input
-              className="form-control"
-              type="number"
-              min="1"
-              required
-              placeholder="Contoh: 50000"
-              value={sell.price}
-              onChange={(e) => setSell({ ...sell, price: e.target.value })}
-            />
-            <label>Kategori</label>
-            <select
-              className="form-control"
-              value={sell.category}
-              onChange={(e) => setSell({ ...sell, category: e.target.value })}
-            >
-              {SELL_CATEGORIES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
-            <label>Ikon produk (emoji)</label>
-            <input
-              className="form-control"
-              value={sell.icon}
-              onChange={(e) => setSell({ ...sell, icon: e.target.value })}
-            />
-            <label>Nomor WhatsApp penjual (contoh 628123456789)</label>
-            <input
-              className="form-control"
-              required
-              placeholder="628xxxxxxxxxx"
-              value={sell.phone}
-              onChange={(e) => setSell({ ...sell, phone: e.target.value })}
-            />
-            <button className="primary" type="submit">
-              ＋ Tambahkan Produk
-            </button>
-          </form>
-        </div>
+          <div className="panel">
+            <p>Tambahkan barang yang ingin kamu jual di CampusMart.</p>
+            <form onSubmit={submitProduct}>
+              <label>Nama Produk</label>
+              <input
+                className="form-control"
+                required
+                placeholder="Contoh: Buku Pemrograman"
+                value={sell.name}
+                onChange={(e) => setSell({ ...sell, name: e.target.value })}
+              />
+              <label>Harga (Rp)</label>
+              <input
+                className="form-control"
+                type="number"
+                min="1"
+                required
+                placeholder="Contoh: 50000"
+                value={sell.price}
+                onChange={(e) => setSell({ ...sell, price: e.target.value })}
+              />
+              <label>Kategori</label>
+              <select
+                className="form-control"
+                value={sell.category}
+                onChange={(e) => setSell({ ...sell, category: e.target.value })}
+              >
+                {SELL_CATEGORIES.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+              <label>Ikon produk (emoji)</label>
+              <input
+                className="form-control"
+                value={sell.icon}
+                onChange={(e) => setSell({ ...sell, icon: e.target.value })}
+              />
+              <label>Nomor WhatsApp penjual (contoh 628123456789)</label>
+              <input
+                className="form-control"
+                required
+                placeholder="628xxxxxxxxxx"
+                value={sell.phone}
+                onChange={(e) => setSell({ ...sell, phone: e.target.value })}
+              />
+              <button className="primary" type="submit">
+                ＋ Tambahkan Produk
+              </button>
+            </form>
+          </div>
         )}
       </section>
 
@@ -452,7 +584,48 @@ export default function CampusMart() {
       <section className="container" id="dashboard">
         <h2 className="section-title">🔐 Dashboard Admin</h2>
 
-        {!adminLogged && (
+        {adminConfigured === false && (
+          <div className="panel" id="admin-setup">
+            <h3>Buat Akun Pembuat Project</h3>
+            <p className="muted" style={{ marginTop: 6 }}>
+              Akun ini hanya bisa dibuat satu kali dan menjadi satu-satunya akun yang dapat menambah produk.
+            </p>
+            <form style={{ marginTop: 16, maxWidth: 420 }} onSubmit={createOwnerAccount}>
+              <label>Username</label>
+              <input
+                className="form-control"
+                autoComplete="username"
+                placeholder="Username pembuat project"
+                value={setupUser}
+                onChange={(e) => setSetupUser(e.target.value)}
+              />
+              <label>Password (minimal 8 karakter)</label>
+              <input
+                className="form-control"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Password baru"
+                value={setupPass}
+                onChange={(e) => setSetupPass(e.target.value)}
+              />
+              <label>Ulangi password</label>
+              <input
+                className="form-control"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Ulangi password"
+                value={setupPass2}
+                onChange={(e) => setSetupPass2(e.target.value)}
+              />
+              <button className="primary" type="submit">
+                Buat Akun Pembuat
+              </button>
+              <p id="admin-message">{setupMessage}</p>
+            </form>
+          </div>
+        )}
+
+        {adminConfigured === true && !adminLogged && (
           <div className="panel" id="admin-login">
             <h3>Masuk sebagai Admin</h3>
             <p className="muted" style={{ marginTop: 6 }}>
