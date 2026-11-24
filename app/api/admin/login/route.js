@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import {
   ADMIN_COOKIE,
   SESSION_MAX_AGE,
+  adminLoginAllowed,
   checkCredentials,
   createSessionToken,
 } from "../../../../lib/admin-auth";
@@ -20,6 +21,17 @@ export async function POST(request) {
 
   const username = typeof body?.username === "string" ? body.username : "";
   const password = typeof body?.password === "string" ? body.password : "";
+
+  if (!adminLoginAllowed()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "Login admin belum dikonfigurasi. Pemilik proyek perlu mengisi ADMIN_USERNAME dan ADMIN_PASSWORD di Vercel.",
+      },
+      { status: 503 }
+    );
+  }
 
   if (!checkCredentials(username, password)) {
     return NextResponse.json(
